@@ -89,11 +89,11 @@
     <!-- STAR FIELD CONTAINER (Dynamic Background) -->
     <div id="star-field"></div>
     
-    <!-- Floating Navbar (Router) - FIXED, CENTERED, SMALLER, THINNER -->
+    <!-- Floating Navbar (Router) - CURVED, FIXED, CENTERED, SMALLER, THINNER -->
     <nav id="floating-navbar" 
-        class="fixed top-0 left-1/2 transform -translate-x-1/2 max-w-3xl w-full py-2 shadow-2xl bg-gray-900/40 light-theme:bg-white/90 transition-colors duration-500 z-[100]" 
-        style="backdrop-filter: blur(15px); -webkit-backdrop-filter: blur(15px); border-bottom: 2px solid rgba(255, 255, 255, 0.2);">
-        <div class="flex justify-between items-center px-4 w-full">
+        class="fixed top-3 left-1/2 transform -translate-x-1/2 max-w-3xl w-full py-2 px-6 rounded-full shadow-2xl bg-gray-900/40 light-theme:bg-white/90 transition-colors duration-500 z-[100]" 
+        style="backdrop-filter: blur(15px); -webkit-backdrop-filter: blur(15px); border: 1px solid rgba(255, 255, 255, 0.1);">
+        <div class="flex justify-between items-center w-full">
             <h2 class="text-lg font-extrabold text-blue-400 light-theme:text-gray-900 cursor-pointer" onclick="router.navigate('landing')">
                 COSMIC LIBRARY 
             </h2>
@@ -348,12 +348,24 @@
             }
             
             try {
-                const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+                // *** FIREBASE CONFIGURATION INJECTED ***
+                // This configuration is required for connecting to your Firebase Project on platforms like Vercel.
+                const firebaseConfig = {
+                    apiKey: "AIzaSyDiGzOzXnEdudbaHn1c1baueXRnb0QAoU4",
+                    authDomain: "cosmic-nexus-4d499.firebaseapp.com",
+                    projectId: "cosmic-nexus-4d499",
+                    storageBucket: "cosmic-nexus-4d499.firebasestorage.app",
+                    messagingSenderId: "967973420693",
+                    appId: "1:967973420693:web:ee7a6946fbd3b585bb259c",
+                    measurementId: "G-3T079H31DX"
+                };
+
                 const app = firebase.initializeApp(firebaseConfig);
                 db = firebase.getFirestore(app);
-                auth = firebase.getAuth(app);
+                auth = firebase.getAuth(app); 
                 
                 return new Promise((resolve) => {
+                    // Start listening for auth state changes immediately
                     firebase.onAuthStateChanged(auth, async (user) => {
                         if (user) {
                             userId = user.uid;
@@ -373,21 +385,24 @@
                     });
                     
                     const initialSign = async () => {
-                        if (auth.currentUser) return;
-
-                        const token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-                        if (token) {
-                            await firebase.signInWithCustomToken(auth, token);
-                        } else {
+                        // FIX: Directly call signInAnonymously if not already signed in.
+                        // The previous logic was causing 'auth/admin-restricted-operation' 
+                        // by potentially trying to resolve an old session using an invalid method.
+                        if (!auth.currentUser) {
+                            console.log("Attempting initial anonymous sign-in...");
                             await firebase.signInAnonymously(auth);
                         }
                     };
-                    initialSign();
+                    
+                    // We execute initial sign-in attempt outside of the onAuthStateChanged 
+                    // resolution promise, but ensure it runs right after initialization.
+                    initialSign(); 
                 });
             } catch (error) {
                 console.error("FATAL: Firebase Initialization failed.", error);
+                // Display the error message in the UI
                 initErrorMessage.classList.remove('hidden');
-                initErrorMessage.querySelector('p').textContent = `Failed to connect to Firebase. Error: ${error.message}. Check console for details.`;
+                initErrorMessage.querySelector('p').textContent = `Failed to connect to Firebase. Error: ${error.message}. Please ensure Firebase Anonymous Authentication is enabled in your project console.`;
                 throw error; 
             }
         }
@@ -413,7 +428,7 @@
                         const isScrolledDown = self.scroll() > scrollThreshold;
 
                         if (self.direction === 1 && isScrolledDown) {
-                            gsap.to(floatingNavbar, { y: "-100%", duration: 0.3, ease: "power2.in" });
+                            gsap.to(floatingNavbar, { y: "-150%", duration: 0.3, ease: "power2.in" });
                         } 
                         else if (self.direction === -1) {
                             gsap.to(floatingNavbar, { y: "0%", duration: 0.3, ease: "power2.out" });
@@ -424,8 +439,10 @@
                     }
                 });
             } else if (pageId === 'landing') {
-                gsap.set(floatingNavbar, { y: "-100%", opacity: 0, pointerEvents: 'none' });
+                // Ensure navbar is completely hidden on landing page
+                gsap.set(floatingNavbar, { y: "-150%", opacity: 0, pointerEvents: 'none' });
             } else {
+                // Keep visible on Library/Profile
                 gsap.set(floatingNavbar, { y: "0%", opacity: 1, pointerEvents: 'auto' });
             }
         }
@@ -472,15 +489,12 @@
                 if (!auth.currentUser) {
                     showMessage("Connecting to the Cosmic Nexus...", 'info');
                     try {
-                        const token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-                        if (token) {
-                            await firebase.signInWithCustomToken(auth, token);
-                        } else {
-                            await firebase.signInAnonymously(auth);
-                        }
+                        // On Vercel, we rely on the anonymous sign-in performed during setupFirebase
+                        await firebase.signInAnonymously(auth);
                     } catch (error) {
                         console.error("Authentication failed during Get Started:", error);
-                        showMessage("Authentication failed. Cannot proceed.", 'error');
+                        // FIX: Updated error message to be more specific about the necessary Firebase setting
+                        showMessage("Authentication failed. Please ensure Anonymous Authentication is enabled in your Firebase console.", 'error');
                         return;
                     }
                 }
@@ -576,7 +590,7 @@
                 
                 // Blue for active chip, Dark Indigo ring
                 const activeClass = isActive
-                    ? `bg-blue-600 ${isDark ? 'text-white' : 'text-white'} shadow-xl ring-4 ring-indigo-700/70`
+                    ? `bg-blue-600 text-white shadow-xl ring-4 ring-indigo-700/70`
                     : `bg-gray-700 ${isDark ? 'text-gray-300' : 'text-gray-700 light-theme:bg-gray-200'} hover:bg-gray-600`;
 
                 return `<button data-genre="${genre}" class="genre-chip px-5 py-2 text-md font-extrabold rounded-full transition-all duration-300 transform hover:scale-110 ${activeClass}">${genre}</button>`;
@@ -619,6 +633,8 @@
         
         const getCollectionPath = (collectionName) => {
             const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+            // NOTE: The security rules for this demo assume data is stored under artifacts/{appId}/users/{userId}/...
+            // If you change the appId here, ensure your Firestore rules accommodate the new path if needed.
             return `artifacts/${appId}/users/${userId}/${collectionName}`;
         };
 
