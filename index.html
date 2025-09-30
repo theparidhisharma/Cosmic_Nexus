@@ -1,0 +1,1010 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Open Library - Cosmic Recommends</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load GSAP Core and ScrollTrigger -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
+    <!-- Load Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Firebase SDK Imports -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, collection, query, where, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        
+        // Expose Firebase functions globally for the main script block to use
+        window.firebase = { 
+            initializeApp, getAuth, signInAnonymously, signInWithCustomToken, 
+            onAuthStateChanged, signOut, getFirestore, doc, getDoc, 
+            addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, 
+            collection, query, where, getDocs
+        };
+    </script>
+    <style>
+        /* Base styling for smooth transitions */
+        :root {
+            --color-primary: #4338CA; /* Indigo 700 (Structural Accent) */
+            --color-secondary: #2563eb; /* Blue 600 (Action/Success) */
+        }
+        body {
+            font-family: 'Inter', sans-serif; 
+            background-color: #000; /* Fixed black background */
+            background-attachment: fixed;
+            transition: background-color 0.5s, color 0.5s; /* Smooth theme transition */
+        }
+
+        /* Custom scrollbar */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-thumb { background: #6b7280; border-radius: 4px; }
+        
+        /* Full-screen star field container */
+        #star-field {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            z-index: -10; 
+            transition: opacity 0.5s;
+        }
+        .light-theme #star-field {
+             opacity: 0; /* Hide stars in light mode */
+        }
+
+        /* Individual star element base style */
+        .star {
+            position: absolute;
+            background-color: white;
+            opacity: 0.7;
+            box-shadow: 0 0 5px rgba(255, 255, 255, 0.5);
+        }
+
+        /* GSAP initial hidden state for initial load */
+        .gsap-hidden {
+            opacity: 0;
+            transform: translateY(40px);
+        }
+
+        /* Custom styles for the FLASHY effect - now unified for dark theme */
+        .glowing-shadow {
+            /* Initial shadow state - Subtle Indigo 700/Blue mix */
+            box-shadow: 0 10px 15px -3px rgba(67, 56, 202, 0.4), 0 4px 6px -2px rgba(37, 99, 235, 0.4); 
+            transition: box-shadow 0.3s;
+        }
+
+        /* Page containers */
+        .page-content {
+            display: none; /* Controlled by routing */
+        }
+    </style>
+</head>
+<body class="bg-black text-gray-200">
+
+    <!-- STAR FIELD CONTAINER (Dynamic Background) -->
+    <div id="star-field"></div>
+    
+    <!-- Floating Navbar (Router) - FIXED, CENTERED, SMALLER, THINNER -->
+    <nav id="floating-navbar" 
+        class="fixed top-0 left-1/2 transform -translate-x-1/2 max-w-3xl w-full py-2 shadow-2xl bg-gray-900/40 light-theme:bg-white/90 transition-colors duration-500 z-[100]" 
+        style="backdrop-filter: blur(15px); -webkit-backdrop-filter: blur(15px); border-bottom: 2px solid rgba(255, 255, 255, 0.2);">
+        <div class="flex justify-between items-center px-4 w-full">
+            <h2 class="text-lg font-extrabold text-blue-400 light-theme:text-gray-900 cursor-pointer" onclick="router.navigate('landing')">
+                COSMIC LIBRARY 
+            </h2>
+            <div id="nav-links" class="flex space-x-2 items-center">
+                <!-- Links dynamically populated based on auth state and theme -->
+            </div>
+        </div>
+    </nav>
+    
+    <!-- Main Application Container -->
+    <div id="app" class="min-h-screen relative z-10 pt-20"> 
+
+        <!-- Initialization Loading/Error Indicator -->
+        <div id="loading-indicator" class="fixed inset-0 bg-black/90 light-theme:bg-white/90 flex flex-col items-center justify-center text-white light-theme:text-gray-800 z-[1000] transition-opacity duration-500">
+            <i data-lucide="orbit" class="w-16 h-16 text-blue-400 mb-4 animate-spin-slow"></i>
+            <p class="2xl font-bold">Initializing Cosmic Nexus...</p>
+        </div>
+        
+        <!-- Error Message Container (Hidden by default) -->
+        <div id="init-error-message" class="hidden fixed inset-0 bg-red-900/95 flex flex-col items-center justify-center text-white z-[1001] p-8">
+            <i data-lucide="alert-triangle" class="w-16 h-16 text-yellow-300 mb-4"></i>
+            <h2 class="3xl font-bold mb-4">Cosmic Data Stream Interrupted</h2>
+            <p class="text-xl text-center">Failed to connect to the recommendation nexus (Firebase). The app may not function correctly. Check console for details.</p>
+        </div>
+
+        <!-- 1. LANDING PAGE -->
+        <section id="landing-page" class="page-content min-h-screen flex items-center justify-center text-center p-8 bg-black/50 light-theme:bg-white/50">
+            <div id="landing-content" class="max-w-4xl p-12 rounded-3xl bg-white/10 light-theme:bg-gray-100/90 backdrop-blur-md shadow-2xl glowing-shadow border-4 border-indigo-700/50 transition-colors duration-500 gsap-hidden">
+                <i data-lucide="galaxy" class="w-20 h-20 mx-auto text-blue-300 light-theme:text-indigo-800 mb-6"></i>
+                <h1 id="main-title-landing" class="text-7xl sm:text-9xl font-black mb-4 text-white light-theme:text-gray-900">
+                    COSMIC LIBRARY
+                </h1>
+                <p class="text-2xl text-gray-300 light-theme:text-gray-700 mb-10 italic">
+                    Unlock infinite reading possibilities across the literary universe.
+                </p>
+                <button onclick="router.handleLandingStart()" class="text-2xl bg-blue-600 text-white p-5 rounded-full font-extrabold hover:bg-blue-500 transition duration-300 shadow-xl glowing-shadow transform hover:scale-[1.05] flex items-center justify-center mx-auto">
+                    <i data-lucide="arrow-right-circle" class="w-7 h-7 inline mr-3"></i> Get Started
+                </button>
+            </div>
+        </section>
+
+        <!-- 2. EXPLORE PAGE (Recommendations) -->
+        <section id="explore-page" class="page-content p-4 sm:p-8 lg:p-12 max-w-7xl mx-auto hidden">
+            <header id="explore-header" class="flex justify-between items-center mb-8 lg:mb-16">
+                <h1 class="text-6xl sm:text-7xl font-black text-blue-400 light-theme:text-indigo-800">
+                    EXPLORE <span class="text-gray-400 light-theme:text-gray-600 text-lg font-light block sm:inline-block mt-1 sm:ml-4">/ Cosmic Picks</span>
+                </h1>
+            </header>
+            
+            <section id="hero-section" class="mb-12 p-8 sm:p-12 rounded-2xl shadow-2xl glowing-shadow bg-gray-800/95 light-theme:bg-gray-100/95 transition-colors duration-500 border-b-8 border-indigo-700">
+                <h2 class="text-5xl font-extrabold mb-4 text-gray-100 light-theme:text-gray-900">
+                    Curated Recommendations
+                </h2>
+                <div class="flex flex-col sm:flex-row gap-4">
+                    <input id="search-input" type="text" placeholder="Search the galaxy by title or author..."
+                           class="flex-grow p-4 border-2 border-indigo-700 rounded-xl focus:ring-4 focus:ring-indigo-700 bg-gray-700 light-theme:bg-white text-gray-100 light-theme:text-gray-900 placeholder-gray-400 transition duration-300 text-lg">
+                    <button id="suggest-button" class="bg-blue-600 text-white p-4 rounded-xl font-extrabold hover:bg-blue-500 transition duration-300 shadow-xl glowing-shadow transform hover:scale-[1.05] flex items-center justify-center">
+                        <i data-lucide="zap" class="w-6 h-6 inline mr-2 animate-pulse"></i>IGNITE Suggestion Engine
+                    </button>
+                </div>
+            </section>
+
+            <section id="filter-section" class="mb-12">
+                <h3 class="text-2xl font-bold mb-5 text-blue-300 light-theme:text-indigo-800 border-b border-indigo-700/50 pb-2">Select Your Vibe:</h3>
+                <div id="genre-chips" class="flex flex-wrap gap-3"></div>
+            </section>
+
+            <section>
+                <h3 class="3xl font-black mb-8 text-gray-100 light-theme:text-gray-800" id="results-title">
+                    Top Picks: The Algorithm Has Spoken
+                </h3>
+                <div id="book-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8"></div>
+            </section>
+        </section>
+
+        <!-- 3. MY LIBRARY PAGE -->
+        <section id="library-page" class="page-content p-4 sm:p-8 lg:p-12 max-w-7xl mx-auto hidden">
+            <h1 class="text-6xl sm:text-7xl font-black text-blue-400 light-theme:text-indigo-800 mb-8">MY LIBRARY</h1>
+            
+            <!-- LIBRARY SEARCH INPUT -->
+            <div class="mb-10 p-4 rounded-2xl bg-gray-900/50 light-theme:bg-gray-200/50 shadow-lg border border-indigo-700/30">
+                <input id="library-search-input" type="text" placeholder="Filter your saved books or list names..."
+                       class="w-full p-4 border-2 border-indigo-700 rounded-xl focus:ring-4 focus:ring-indigo-700 bg-gray-700 light-theme:bg-white text-gray-100 light-theme:text-gray-900 placeholder-gray-400 transition duration-300 text-lg">
+            </div>
+
+            <div id="library-section" class="p-8 rounded-2xl shadow-2xl glowing-shadow bg-gray-800/95 light-theme:bg-white/95">
+                <h2 class="text-4xl font-bold mb-6 text-blue-500 light-theme:text-indigo-800 flex items-center">
+                    <i data-lucide="book-open-check" class="w-8 h-8 mr-3"></i> Reading List
+                </h2>
+                <div id="reading-list-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <p id="no-reading-list" class="text-gray-500 light-theme:text-gray-500 italic col-span-full">Your reading list is empty. Explore and save some books!</p>
+                </div>
+            </div>
+
+            <div class="mt-12 p-8 rounded-2xl shadow-2xl glowing-shadow bg-gray-800/95 light-theme:bg-white/95">
+                <h2 class="text-4xl font-bold mb-6 text-blue-500 light-theme:text-indigo-800 flex items-center">
+                    <i data-lucide="list-checks" class="w-8 h-8 mr-3"></i> My Custom Lists
+                </h2>
+                <div class="flex flex-col sm:flex-row gap-4 mb-6">
+                    <input id="new-list-name" type="text" placeholder="New List Name (e.g., Sci-Fi Classics)"
+                           class="flex-grow p-3 border-2 border-gray-300 rounded-lg bg-gray-700 light-theme:bg-white text-gray-100 light-theme:text-gray-900">
+                    <button id="create-list-button" class="bg-blue-600 text-white p-3 rounded-lg font-bold hover:bg-blue-500 transition">
+                        Create List
+                    </button>
+                </div>
+                <div id="custom-lists-container" class="space-y-6">
+                    <p id="no-custom-lists" class="text-gray-500 light-theme:text-gray-500 italic">No custom lists yet. Start organizing your cosmic journey!</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- 4. PROFILE PAGE -->
+        <section id="profile-page" class="page-content p-4 sm:p-8 lg:p-12 max-w-lg mx-auto hidden">
+            <h1 class="text-6xl sm:text-7xl font-black text-blue-400 light-theme:text-indigo-800 mb-8">PROFILE</h1>
+            
+            <div id="profile-card" class="p-8 rounded-2xl shadow-2xl glowing-shadow bg-gray-800/95 light-theme:bg-white/95 border-t-8 border-indigo-700">
+                <h2 class="text-4xl font-bold mb-6 text-gray-100 light-theme:text-gray-900 flex items-center">
+                    <i data-lucide="user-circle" class="w-10 h-10 mr-3 text-blue-500 light-theme:text-indigo-800"></i> Account Details
+                </h2>
+                
+                <div id="auth-status">
+                    <!-- Dynamic Auth Status/Forms go here -->
+                </div>
+
+                <div id="user-info-display" class="space-y-4 mt-6 hidden">
+                    <p class="text-lg"><span class="font-semibold text-blue-400 light-theme:text-indigo-800">User ID:</span> <span id="display-uid" class="font-mono text-sm block md:inline"></span></p>
+                    <p class="text-lg"><span class="font-semibold text-blue-400 light-theme:text-indigo-800">Login Type:</span> <span id="display-login-type"></span></p>
+                    <p class="text-lg"><span class="font-semibold text-blue-400 light-theme:text-indigo-800">Email:</span> <span id="display-email">Not set</span></p>
+                </div>
+                
+                <button id="logout-button" class="hidden w-full mt-8 py-3 bg-red-600 text-white rounded-xl font-extrabold hover:bg-red-700 transition duration-300 shadow-lg transform hover:scale-[1.01]">
+                    <i data-lucide="log-out" class="w-5 h-5 inline mr-2"></i> Logout
+                </button>
+            </div>
+        </section>
+
+        <!-- Message Box for alerts (instead of alert()) -->
+        <div id="message-box" class="fixed bottom-5 right-5 p-4 rounded-lg shadow-xl text-white opacity-0 transition-opacity duration-300 pointer-events-none z-50"></div>
+
+    </div>
+
+    <script>
+        // Ensure GSAP and ScrollTrigger are available globally
+        gsap.registerPlugin(ScrollTrigger);
+
+        // --- GLOBAL APP STATE ---
+        let db, auth;
+        let userId = null;
+        let currentBooks = [];
+        let activeFilter = 'All';
+        let librarySearchQuery = ''; 
+        let currentTheme = 'dark'; // NEW THEME STATE
+        
+        // Data storage for persistent library state (updated by onSnapshot)
+        let savedReadingList = [];
+        let savedCustomLists = [];
+
+        const initialBooks = [
+            // ... (Book Data defined here)
+            { id: 1, title: "The Martian", author: "Andy Weir", genre: "Sci-Fi", rating: 4.8, coverPlaceholder: "ASTRONOMY" },
+            { id: 2, title: "Educated", author: "Tara Westover", genre: "Biography", rating: 4.6, coverPlaceholder: "LEARNING" },
+            { id: 3, title: "The Vanishing Half", author: "Brit Bennett", genre: "Fiction", rating: 4.5, coverPlaceholder: "TWINS" },
+            { id: 4, title: "Sapiens", author: "Yuval Noah Harari", genre: "Non-Fiction", rating: 4.7, coverPlaceholder: "HISTORY" },
+            { id: 5, title: "Project Hail Mary", author: "Andy Weir", genre: "Sci-Fi", rating: 4.9, coverPlaceholder: "ROCKET" },
+            { id: 6, title: "Where the Crawdads Sing", author: "Delia Owens", genre: "Fiction", rating: 4.4, coverPlaceholder: "MARSH" },
+            { id: 7, title: "Deep Work", author: "Cal Newport", genre: "Productivity", rating: 4.3, coverPlaceholder: "FOCUS" },
+            { id: 8, title: "The Silent Patient", author: "Alex Michaelides", genre: "Thriller", rating: 4.2, coverPlaceholder: "THERAPY" },
+            { id: 9, title: "Becoming", author: "Michelle Obama", genre: "Biography", rating: 4.5, coverPlaceholder: "LEADER" },
+            { id: 10, title: "1984", author: "George Orwell", genre: "Dystopian", rating: 4.7, coverPlaceholder: "BIG BROTHER" },
+            { id: 11, title: "The Great Gatsby", author: "F. Scott Fitzgerald", genre: "Classics", rating: 4.3, coverPlaceholder: "JAZZ AGE" },
+            { id: 12, title: "Atomic Habits", author: "James Clear", genre: "Productivity", rating: 4.8, coverPlaceholder: "HABITS" },
+        ];
+        currentBooks = [...initialBooks]; 
+
+        // --- DOM Elements ---
+        const body = document.body;
+        const appContainer = document.getElementById('app');
+        const loadingIndicator = document.getElementById('loading-indicator');
+        const initErrorMessage = document.getElementById('init-error-message');
+        const messageBox = document.getElementById('message-box');
+        const starField = document.getElementById('star-field'); 
+        const floatingNavbar = document.getElementById('floating-navbar'); 
+
+        // Page/Navigation Elements
+        const pages = ['landing', 'explore', 'library', 'profile'];
+        const pageElements = pages.reduce((acc, id) => {
+            acc[id] = document.getElementById(`${id}-page`);
+            return acc;
+        }, {});
+        const navLinksContainer = document.getElementById('nav-links');
+
+        // Explore Page Elements
+        const bookGrid = document.getElementById('book-grid');
+        const genreChipsContainer = document.getElementById('genre-chips');
+        const searchInput = document.getElementById('search-input');
+        const suggestButton = document.getElementById('suggest-button');
+        const resultsTitle = document.getElementById('results-title');
+
+        // Library Page Elements
+        const readingListGrid = document.getElementById('reading-list-grid');
+        const customListsContainer = document.getElementById('custom-lists-container');
+        const newListInput = document.getElementById('new-list-name');
+        const createListButton = document.getElementById('create-list-button');
+        const noReadingList = document.getElementById('no-reading-list');
+        const noCustomLists = document.getElementById('no-custom-lists');
+        const librarySearchInput = document.getElementById('library-search-input'); 
+
+        // Profile Page Elements
+        const authStatusDiv = document.getElementById('auth-status');
+        const userInfoDisplay = document.getElementById('user-info-display');
+        const displayUid = document.getElementById('display-uid');
+        const displayLoginType = document.getElementById('display-login-type');
+        const logoutButton = document.getElementById('logout-button');
+        
+        lucide.createIcons(); 
+
+        // --- THEME SWITCHING (MINIMALISTIC) ---
+
+        function toggleTheme() {
+            currentTheme = (currentTheme === 'dark') ? 'light' : 'dark';
+            localStorage.setItem('theme', currentTheme);
+            applyTheme(currentTheme);
+        }
+
+        function applyTheme(theme) {
+            // 1. Update body classes
+            if (theme === 'dark') {
+                body.classList.remove('light-theme', 'bg-gray-50', 'text-gray-800');
+                body.classList.add('bg-black', 'text-gray-200');
+            } else {
+                body.classList.add('light-theme', 'bg-gray-50', 'text-gray-800');
+                body.classList.remove('bg-black', 'text-gray-200');
+            }
+
+            // 2. Update star field opacity (CSS handles transition)
+            starField.style.opacity = (theme === 'dark' ? '1' : '0');
+            
+            // 3. Re-render dynamic elements that need theme-specific styling
+            if (router.currentPage === 'explore') renderBooks(currentBooks); 
+            if (router.currentPage === 'library') applyLibraryFilters();
+            
+            // 4. Update nav links
+            updateNavLinks(auth ? auth.currentUser : null);
+        }
+
+        // --- FIREBASE AND AUTH SETUP ---
+
+        async function setupFirebase() {
+            if (typeof window.firebase === 'undefined') {
+                console.error("Firebase SDK not loaded. Check import scripts.");
+                throw new Error("Firebase SDK not loaded.");
+            }
+            
+            try {
+                const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+                const app = firebase.initializeApp(firebaseConfig);
+                db = firebase.getFirestore(app);
+                auth = firebase.getAuth(app);
+                
+                return new Promise((resolve) => {
+                    firebase.onAuthStateChanged(auth, async (user) => {
+                        if (user) {
+                            userId = user.uid;
+                            console.log("Firebase Auth: User logged in as:", user.isAnonymous ? "Anonymous" : "User", "UID:", userId);
+                            updateProfileUI(user);
+                            if (db) await loadUserLists();
+                        } else {
+                            userId = null;
+                            updateProfileUI(null);
+                            readingListUnsubscribe();
+                            customListsUnsubscribe();
+                            savedReadingList = []; 
+                            savedCustomLists = [];
+                            console.log("Firestore Listeners unsubscribed due to user logout.");
+                        }
+                        resolve(); 
+                    });
+                    
+                    const initialSign = async () => {
+                        if (auth.currentUser) return;
+
+                        const token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+                        if (token) {
+                            await firebase.signInWithCustomToken(auth, token);
+                        } else {
+                            await firebase.signInAnonymously(auth);
+                        }
+                    };
+                    initialSign();
+                });
+            } catch (error) {
+                console.error("FATAL: Firebase Initialization failed.", error);
+                initErrorMessage.classList.remove('hidden');
+                initErrorMessage.querySelector('p').textContent = `Failed to connect to Firebase. Error: ${error.message}. Check console for details.`;
+                throw error; 
+            }
+        }
+
+        // --- ROUTING AND NAVIGATION ---
+        let navbarScrollTrigger = null;
+
+        function setupSmartNavbar(pageId) {
+            if (navbarScrollTrigger) {
+                navbarScrollTrigger.kill();
+                navbarScrollTrigger = null;
+            }
+
+            if (pageId === 'explore') {
+                gsap.set(floatingNavbar, { y: "0%", opacity: 1, pointerEvents: 'auto' }); 
+                
+                navbarScrollTrigger = ScrollTrigger.create({
+                    trigger: body,
+                    start: "top top",
+                    end: "bottom top",
+                    onUpdate: (self) => {
+                        const scrollThreshold = 150; 
+                        const isScrolledDown = self.scroll() > scrollThreshold;
+
+                        if (self.direction === 1 && isScrolledDown) {
+                            gsap.to(floatingNavbar, { y: "-100%", duration: 0.3, ease: "power2.in" });
+                        } 
+                        else if (self.direction === -1) {
+                            gsap.to(floatingNavbar, { y: "0%", duration: 0.3, ease: "power2.out" });
+                        }
+                        else if (self.scroll() <= scrollThreshold) {
+                            gsap.to(floatingNavbar, { y: "0%", duration: 0.3, ease: "power2.out" });
+                        }
+                    }
+                });
+            } else if (pageId === 'landing') {
+                gsap.set(floatingNavbar, { y: "-100%", opacity: 0, pointerEvents: 'none' });
+            } else {
+                gsap.set(floatingNavbar, { y: "0%", opacity: 1, pointerEvents: 'auto' });
+            }
+        }
+
+        const router = {
+            currentPage: 'landing',
+            navigate: async function(pageId) {
+                const prevPageId = this.currentPage;
+                if (pageId === prevPageId) return;
+                
+                if (['explore', 'library', 'profile'].includes(pageId) && !auth.currentUser) {
+                    showMessage("Please 'Get Started' first to explore the cosmos!", 'error');
+                    return;
+                }
+
+                const prevPage = pageElements[prevPageId];
+                const nextPage = pageElements[pageId];
+
+                if (prevPage) {
+                    await gsap.to(prevPage, { opacity: 0, scale: 0.98, duration: 0.3, ease: "power2.in" });
+                    prevPage.style.display = 'none';
+                }
+
+                this.currentPage = pageId;
+                nextPage.style.display = 'block';
+
+                await gsap.fromTo(nextPage, { opacity: 0, scale: 1.02 }, { opacity: 1, scale: 1, duration: 0.4, ease: "power2.out" });
+
+                setupSmartNavbar(pageId); 
+
+                if (pageId === 'explore') {
+                    applyFilters(); 
+                }
+                if (pageId === 'library') {
+                    librarySearchQuery = librarySearchInput.value.trim(); 
+                    applyLibraryFilters(); 
+                    if (db) await loadUserLists(); 
+                }
+                
+                updateNavLinks(auth.currentUser);
+            },
+            
+            handleLandingStart: async function() {
+                if (!auth.currentUser) {
+                    showMessage("Connecting to the Cosmic Nexus...", 'info');
+                    try {
+                        const token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+                        if (token) {
+                            await firebase.signInWithCustomToken(auth, token);
+                        } else {
+                            await firebase.signInAnonymously(auth);
+                        }
+                    } catch (error) {
+                        console.error("Authentication failed during Get Started:", error);
+                        showMessage("Authentication failed. Cannot proceed.", 'error');
+                        return;
+                    }
+                }
+                
+                if (auth.currentUser) {
+                    router.navigate('explore');
+                    showMessage("Welcome to the Cosmic Library! Your anonymous session is live.", 'success');
+                }
+            }
+        };
+
+        // --- UI & DATA FUNCTIONS (Explore Page) ---
+
+        function renderBooks(books) {
+            ScrollTrigger.getAll().forEach(trigger => {
+                if (trigger.trigger && trigger.trigger.classList.contains('book-card')) {
+                    trigger.kill();
+                }
+            });
+            bookGrid.innerHTML = '';
+
+            if (books.length === 0) {
+                bookGrid.innerHTML = `<p class="col-span-full text-center text-3xl text-red-400 py-12 font-bold animate-pulse">404: Literary match not found. Try a broader search!</p>`;
+                return;
+            }
+
+            const cardElements = books.map(book => {
+                // Dynamic class assignment based on currentTheme
+                const isDark = currentTheme === 'dark';
+                const textColor = isDark ? 'text-gray-100' : 'text-gray-900';
+                const bgColor = isDark ? 'bg-gray-800/90' : 'bg-white/90';
+                const cardBorder = isDark ? 'border-indigo-700' : 'border-blue-500'; // Indigo 700 for dark theme structural border
+                
+                // Blue Accent for active genre
+                const genreClass = activeFilter === book.genre 
+                    ? `bg-blue-600 text-white border-2 border-indigo-700` 
+                    : `bg-gray-700 ${isDark ? 'text-gray-300' : 'text-gray-600'} border border-gray-600`;
+                
+                const addToReadingListFn = `saveBookToFirestore({
+                    id: ${book.id},
+                    title: '${book.title.replace(/'/g, "\\'")}',
+                    author: '${book.author.replace(/'/g, "\\'")}',
+                    rating: ${book.rating},
+                    genre: '${book.genre}'
+                }, 'readingList')`;
+
+                return `
+                    <div class="book-card p-5 rounded-2xl shadow-xl glowing-shadow ${bgColor} transform transition duration-500 hover:shadow-2xl hover:-translate-y-2 cursor-pointer border-t-4 ${cardBorder} opacity-0"
+                         style="transform: translateY(50px) rotateX(-45deg);"> 
+                        <div class="h-56 rounded-xl mb-4 bg-gray-700 light-theme:bg-gray-200 flex items-center justify-center text-sm font-semibold text-gray-400 overflow-hidden">
+                            <img src="https://placehold.co/192x192/374151/D1D5DB?text=${book.coverPlaceholder}" onerror="this.onerror=null; this.src='https://placehold.co/192x192/0a0a0a/ffffff?text=COVER'" class="w-full h-full object-cover">
+                        </div>
+
+                        <h4 class="text-2xl font-black mb-1 truncate ${textColor}" title="${book.title}">${book.title}</h4>
+                        <p class="text-md ${isDark ? 'text-gray-400' : 'text-gray-600'} mb-3 italic">by ${book.author}</p>
+                        
+                        <div class="flex justify-between items-center text-sm mb-4">
+                            <span class="px-4 py-1 text-sm font-extrabold rounded-full ${genreClass} transition-colors">${book.genre}</span>
+                            <div class="flex items-center text-yellow-400">
+                                <i data-lucide="star" class="w-5 h-5 fill-yellow-400 mr-1"></i>
+                                <span class="text-lg font-bold">${book.rating}</span>
+                            </div>
+                        </div>
+
+                        <button onclick="${addToReadingListFn}"
+                            class="mt-2 w-full py-3 text-lg font-bold rounded-xl bg-blue-600 text-white hover:bg-blue-500 transition duration-300 shadow-lg transform hover:scale-[1.01]">
+                            <i data-lucide="plus" class="w-5 h-5 inline mr-1"></i> Add to Reading List
+                        </button>
+                    </div>
+                `;
+            }).join('');
+
+            bookGrid.innerHTML = cardElements;
+            lucide.createIcons(); 
+            
+            ScrollTrigger.batch(".book-card", {
+                start: "top 90%",
+                onEnter: batch => gsap.to(batch, {
+                    opacity: 1, y: 0, rotationX: 0, stagger: 0.15, duration: 0.8, ease: "power4.out"
+                }),
+                onLeaveBack: batch => gsap.to(batch, { opacity: 0, y: 50, rotationX: -45, duration: 0.3 }), 
+                onRefresh: (self) => {
+                    gsap.set(".book-card", { opacity: 0, y: 50, rotationX: -45 });
+                }
+            });
+        }
+
+        function renderGenreChips() {
+            const genres = ['All', ...new Set(initialBooks.map(b => b.genre))];
+            genreChipsContainer.innerHTML = genres.map(genre => {
+                const isActive = genre === activeFilter;
+                const isDark = currentTheme === 'dark';
+                
+                // Blue for active chip, Dark Indigo ring
+                const activeClass = isActive
+                    ? `bg-blue-600 ${isDark ? 'text-white' : 'text-white'} shadow-xl ring-4 ring-indigo-700/70`
+                    : `bg-gray-700 ${isDark ? 'text-gray-300' : 'text-gray-700 light-theme:bg-gray-200'} hover:bg-gray-600`;
+
+                return `<button data-genre="${genre}" class="genre-chip px-5 py-2 text-md font-extrabold rounded-full transition-all duration-300 transform hover:scale-110 ${activeClass}">${genre}</button>`;
+            }).join('');
+
+            document.querySelectorAll('.genre-chip').forEach(el => {
+                if (el.dataset.genre !== activeFilter) {
+                    el.addEventListener('mouseenter', () => {
+                        gsap.to(el, { scale: 1.1, duration: 0.2, backgroundColor: '#374151', ease: "power1.out" }); // Darker gray hover
+                    });
+                    el.addEventListener('mouseleave', () => {
+                        gsap.to(el, { scale: 1, duration: 0.2, backgroundColor: '#4b5563', ease: "power1.out" }); // Gray base
+                    });
+                }
+            });
+        }
+
+        function applyFilters() {
+            let filtered = initialBooks;
+            const query = searchInput.value.toLowerCase().trim();
+
+            if (activeFilter !== 'All') {
+                filtered = filtered.filter(book => book.genre === activeFilter);
+            }
+            if (query) {
+                filtered = filtered.filter(book => book.title.toLowerCase().includes(query) || book.author.toLowerCase().includes(query));
+            }
+
+            filtered.sort((a, b) => b.rating - a.rating);
+            currentBooks = filtered;
+            renderBooks(currentBooks);
+
+            const title = query ? `Search Results for "${query}"` : (activeFilter !== 'All' ? `Cosmic Picks in: ${activeFilter}` : `Top Picks: The Algorithm Has Spoken`);
+            resultsTitle.textContent = title;
+            gsap.from(resultsTitle, { opacity: 0, y: -20, duration: 0.5 });
+        }
+
+
+        // --- FIREBASE CRUD & LISTENER FUNCTIONS (My Library Page) ---
+        
+        const getCollectionPath = (collectionName) => {
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+            return `artifacts/${appId}/users/${userId}/${collectionName}`;
+        };
+
+        async function saveBookToFirestore(book, listName) {
+            if (!userId) {
+                showMessage('Login required to save books to your library!', 'error');
+                return;
+            }
+            try {
+                const listRef = firebase.collection(db, getCollectionPath(listName));
+                
+                const q = firebase.query(listRef, firebase.where('title', '==', book.title), firebase.where('author', '==', book.author));
+                const snapshot = await firebase.getDocs(q);
+
+                if (snapshot.docs.length === 0) {
+                    await firebase.addDoc(listRef, book);
+                    showMessage(`'${book.title}' added to ${listName.replace(/List$/, ' List')}!`, 'success');
+                } else {
+                    showMessage(`'${book.title}' is already in your ${listName.replace(/List$/, ' List')}.`, 'info');
+                }
+            } catch (error) {
+                console.error("Error saving book:", error);
+                showMessage("Failed to save book to library.", 'error');
+            }
+        }
+        
+        let readingListUnsubscribe = () => {};
+        let customListsUnsubscribe = () => {};
+
+        async function loadUserLists() {
+            if (!userId || !db) return;
+
+            readingListUnsubscribe(); 
+            const readingListRef = firebase.collection(db, getCollectionPath('readingList'));
+            readingListUnsubscribe = firebase.onSnapshot(readingListRef, (snapshot) => {
+                savedReadingList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })); 
+                applyLibraryFilters(); 
+            }, (error) => {
+                console.error("Error listening to reading list:", error);
+                showMessage("Error loading reading list.", 'error');
+                if (error.code === 'permission-denied') {
+                    readingListUnsubscribe();
+                    console.error("Stopping reading list listener due to permission error.");
+                }
+            });
+            
+            customListsUnsubscribe();
+            const customListsRef = firebase.collection(db, getCollectionPath('customLists'));
+            customListsUnsubscribe = firebase.onSnapshot(customListsRef, (snapshot) => {
+                savedCustomLists = snapshot.docs.map(doc => ({ id: doc.id, name: doc.data().name })); 
+                applyLibraryFilters(); 
+            }, (error) => {
+                console.error("Error listening to custom lists:", error);
+                showMessage("Error loading custom lists.", 'error');
+                if (error.code === 'permission-denied') {
+                    customListsUnsubscribe();
+                    console.error("Stopping custom lists listener due to permission error.");
+                }
+            });
+        }
+        
+        function applyLibraryFilters() {
+            const query = librarySearchInput.value.toLowerCase().trim();
+            librarySearchQuery = query;
+
+            const filteredReadingList = savedReadingList.filter(book => 
+                book.title.toLowerCase().includes(query) || book.author.toLowerCase().includes(query)
+            );
+            renderReadingList(filteredReadingList);
+
+            const filteredCustomLists = savedCustomLists.filter(list => 
+                list.name.toLowerCase().includes(query)
+            );
+            renderCustomLists(filteredCustomLists);
+        }
+
+        function renderReadingList(books) {
+            readingListGrid.innerHTML = '';
+            const isDark = currentTheme === 'dark';
+            
+            if (books.length === 0) {
+                noReadingList.style.display = 'block';
+                return;
+            }
+            noReadingList.style.display = 'none';
+
+            books.forEach(book => {
+                readingListGrid.innerHTML += `
+                    <div class="p-4 rounded-xl shadow-md ${isDark ? 'bg-gray-700' : 'bg-gray-100'} border-l-4 border-blue-500">
+                        <h4 class="text-xl font-bold truncate ${isDark ? 'text-gray-100' : 'text-gray-900'}">${book.title}</h4>
+                        <p class="text-sm italic ${isDark ? 'text-gray-400' : 'text-gray-600'}">by ${book.author}</p>
+                        <p class="text-sm text-yellow-400 mt-2">Rating: ${book.rating}</p>
+                    </div>
+                `;
+            });
+            lucide.createIcons();
+        }
+
+        function renderCustomLists(lists) {
+            customListsContainer.innerHTML = '';
+            const isDark = currentTheme === 'dark';
+
+            if (lists.length === 0) {
+                noCustomLists.style.display = 'block';
+                return;
+            }
+            noCustomLists.style.display = 'none';
+
+            lists.forEach(list => {
+                customListsContainer.innerHTML += `
+                    <div class="flex items-center justify-between p-4 rounded-xl shadow-md ${isDark ? 'bg-gray-700' : 'bg-gray-100'} border-l-4 border-indigo-700">
+                        <span class="text-xl font-bold ${isDark ? 'text-gray-100' : 'text-gray-900'}">${list.name}</span>
+                        <i data-lucide="eye" class="w-6 h-6 ${isDark ? 'text-gray-500' : 'text-gray-700'}"></i> 
+                    </div>
+                `;
+            });
+            lucide.createIcons();
+        }
+
+        // --- PROFILE & AUTH UI ---
+        
+        function updateProfileUI(user) {
+            const isDark = currentTheme === 'dark';
+
+            if (user) {
+                displayUid.textContent = user.uid;
+                displayLoginType.textContent = user.isAnonymous ? "Anonymous Session" : "Email/Password";
+                userInfoDisplay.classList.remove('hidden');
+                logoutButton.classList.remove('hidden');
+                authStatusDiv.innerHTML = ''; 
+            } else {
+                userInfoDisplay.classList.add('hidden');
+                logoutButton.classList.add('hidden');
+                authStatusDiv.innerHTML = `
+                    <p class="text-xl text-yellow-400 font-bold mb-4">You are currently logged out.</p>
+                `;
+            }
+            updateNavLinks(user);
+        }
+
+        async function handleLogout() {
+            try {
+                await firebase.signOut(auth);
+                userId = null;
+                updateProfileUI(null);
+                router.navigate('landing');
+                showMessage("Successfully logged out of the Cosmic Library.", 'info');
+            } catch (error) {
+                console.error("Logout error:", error);
+                showMessage("Logout failed.", 'error');
+            }
+        }
+        logoutButton.addEventListener('click', handleLogout);
+
+        createListButton.addEventListener('click', async () => {
+            const listName = newListInput.value.trim();
+            if (!listName || !userId) {
+                showMessage("Please enter a valid list name and ensure you are logged in.", 'error');
+                return;
+            }
+            try {
+                const listRef = firebase.collection(db, getCollectionPath('customLists'));
+                await firebase.addDoc(listRef, { name: listName, createdAt: new Date() });
+                newListInput.value = '';
+                showMessage(`Custom list '${listName}' created!`, 'success');
+            } catch (error) {
+                console.error("Error creating list:", error);
+                showMessage("Failed to create custom list.", 'error');
+            }
+        });
+
+        // --- NAVIGATION UI ---
+        function updateNavLinks(user) {
+            navLinksContainer.innerHTML = ''; 
+            const isDark = currentTheme === 'dark';
+
+            // 1. Theme Toggle Button (Minimalist)
+            const toggleIcon = isDark ? 'sun' : 'moon';
+            const toggleTooltip = isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode';
+            const toggleColor = isDark ? 'text-yellow-400' : 'text-indigo-700'; // Indigo 700 in light mode
+
+            const toggleHtml = `
+                <button onclick="toggleTheme()" title="${toggleTooltip}" class="p-2 rounded-full hover:bg-gray-700 light-theme:hover:bg-gray-200 transition">
+                    <i data-lucide="${toggleIcon}" class="w-6 h-6 ${toggleColor}"></i>
+                </button>
+            `;
+            
+            // 2. Navigation Links
+            const links = [
+                { id: 'explore', text: 'Explore', auth: true },
+                { id: 'library', text: 'My Library', auth: true },
+                { id: 'profile', text: 'Profile', auth: false }
+            ];
+
+            let linkHtml = '';
+            links.forEach(link => {
+                if (link.auth === true && !user) return; 
+                
+                const activeClass = router.currentPage === link.id 
+                    ? `text-blue-400 light-theme:text-indigo-800 border-b-2 border-blue-400 light-theme:border-indigo-800` // Indigo 800 border
+                    : `text-gray-300 light-theme:text-gray-600 hover:text-white hover:text-blue-200 light-theme:hover:text-indigo-700`; // Indigo 700 hover
+                
+                linkHtml += `<button onclick="router.navigate('${link.id}')" class="px-3 py-1 text-md font-semibold transition-colors duration-200 ${activeClass}">${link.text}</button>`;
+            });
+
+            navLinksContainer.innerHTML = linkHtml + toggleHtml;
+            lucide.createIcons();
+        }
+
+        // --- MISC UI FUNCTIONS ---
+
+        function showMessage(message, type = 'info') {
+            // Colors now use Blue for success, Indigo for info/structural
+            let bgColor = 'bg-indigo-700'; // Dark Indigo background
+            let shadowColor = 'shadow-indigo-600/80'; // Dark Indigo shadow
+            if (type === 'success') {
+                bgColor = 'bg-blue-600';
+                shadowColor = 'shadow-blue-500/80';
+            }
+            if (type === 'error') {
+                bgColor = 'bg-red-600';
+                shadowColor = 'shadow-red-500/80';
+            }
+
+            messageBox.innerHTML = `<i data-lucide="sparkles" class="w-5 h-5 inline mr-2"></i> ${message}`;
+            messageBox.className = `fixed bottom-5 right-5 p-5 rounded-xl shadow-2xl ${shadowColor} text-white opacity-100 ${bgColor} transition-opacity duration-300 z-50 pointer-events-none`;
+            lucide.createIcons(); 
+            
+            gsap.fromTo(messageBox, { y: 50, opacity: 0, scale: 0.8 }, { y: 0, opacity: 1, scale: 1, duration: 0.5, ease: "back.out(1.5)" });
+
+            setTimeout(() => {
+                gsap.to(messageBox, { y: 50, opacity: 0, scale: 0.8, duration: 0.5, onComplete: () => {
+                    messageBox.className = 'fixed bottom-5 right-5 p-4 rounded-lg shadow-xl text-white opacity-0 transition-opacity duration-300 pointer-events-none z-50';
+                }});
+            }, 3500);
+        }
+
+        function createStarField() {
+            starField.innerHTML = '';
+            const starCount = 200; 
+            for (let i = 0; i < starCount; i++) {
+                const star = document.createElement('div');
+                const size = Math.random() * 3 + 1; 
+                const speedFactor = 1 + (3 - size) * 0.5; 
+                const duration = 80 - (size * 10); 
+
+                star.className = 'star fixed rounded-full';
+                star.style.width = star.style.height = `${size}px`;
+                star.style.top = `${Math.random() * 100}vh`;
+                star.style.left = `${Math.random() * 100}vw`;
+                star.style.backgroundColor = `rgba(255, 255, 255, ${Math.random() * 0.7 + 0.3})`;
+                
+                starField.appendChild(star);
+
+                gsap.to(star, {
+                    x: `+=${Math.random() > 0.5 ? 300 : -300}`,
+                    y: `+=${Math.random() > 0.5 ? 100 : -100}`,
+                    opacity: 0.5,
+                    duration: duration,
+                    ease: "sine.inOut",
+                    repeat: -1,
+                    yoyo: true,
+                });
+                
+                gsap.to(star, {
+                    y: `+=${size * 5}`,
+                    ease: "none",
+                    scrollTrigger: {
+                        trigger: body,
+                        start: "top top",
+                        end: "bottom top",
+                        scrub: speedFactor * 0.1,
+                    }
+                });
+            }
+        }
+
+
+        // --- APPLICATION STARTUP ---
+
+        async function initialize() {
+            // 1. Initial Theme Setup (Read from localStorage or default to dark)
+            currentTheme = localStorage.getItem('theme') || 'dark';
+            applyTheme(currentTheme); 
+
+            // 2. Setup Firebase and Authentication (CRITICAL BLOCK)
+            try {
+                await setupFirebase();
+                console.log("Firebase & Auth ready.");
+            } catch(e) {
+                loadingIndicator.style.opacity = '0';
+                loadingIndicator.style.pointerEvents = 'none';
+                return; 
+            }
+            
+            // 3. Create the dynamic, moving star field
+            createStarField();
+
+            // 4. Initial Content Load for Explore page
+            renderGenreChips();
+
+            // 5. GSAP Kinetic Entrance Animation (Initial Page)
+            const tl = gsap.timeline({ onComplete: () => {
+                // Hide loading indicator only after everything is loaded and animated
+                gsap.to(loadingIndicator, { opacity: 0, duration: 0.5, onComplete: () => {
+                    loadingIndicator.style.display = 'none';
+                }});
+            }});
+            
+            tl.to('#landing-content', { 
+                opacity: 1, 
+                y: 0, 
+                duration: 1.5, 
+                ease: "power3.out", 
+                delay: 0.5 
+            }, 0); 
+
+            gsap.to('#main-title-landing', {
+                scale: 1.05, skewX: 0.5, rotation: 0.2, duration: 3.5, ease: "sine.inOut", repeat: -1, yoyo: true,
+            });
+
+            // ADDED: Perpetual glow animation for main content containers (Darker Indigo pulse)
+            gsap.to('.glowing-shadow', {
+                boxShadow: '0 0 20px rgba(67, 56, 202, 0.5)', // Indigo 700 RGBA
+                duration: 4,
+                ease: "sine.inOut",
+                repeat: -1,
+                yoyo: true,
+                delay: 1 
+            });
+
+            // Initial Router Navigation (Landing Page)
+            router.navigate('landing');
+
+            // 6. Event Listeners for Explore Page
+            genreChipsContainer.addEventListener('click', (e) => {
+                if (e.target.classList.contains('genre-chip')) {
+                    const newFilter = e.target.dataset.genre;
+                    if (newFilter !== activeFilter) {
+                        activeFilter = newFilter;
+                        renderGenreChips(); 
+                        applyFilters();
+                        showMessage(`Filtered by: **${newFilter}**. New results loaded!`, 'info');
+                    }
+                }
+            });
+
+            let searchTimer;
+            searchInput.addEventListener('input', () => {
+                clearTimeout(searchTimer);
+                searchTimer = setTimeout(() => {
+                    activeFilter = 'All'; 
+                    renderGenreChips();
+                    applyFilters();
+                }, 300); 
+            });
+
+            suggestButton.addEventListener('click', () => {
+                gsap.timeline()
+                    .to(suggestButton, { scale: 0.98, duration: 0.1, yoyo: true, repeat: 1,
+                        boxShadow: "0 0 30px rgba(37, 99, 235, 0.7)", // Blue 600 shadow
+                        backgroundColor: '#1e40af', // Darker Blue
+                    })
+                    .to(suggestButton, { clearProps: "boxShadow, backgroundColor" })
+                    .call(() => {
+                        currentBooks = [...initialBooks].sort(() => 0.5 - Math.random());
+                        renderBooks(currentBooks);
+                        showMessage('Running Quantum Recommendation Model... **Suggestions IGNTITED!**', 'success');
+                    });
+            });
+
+            // 7. Library Search Event Listener
+            let librarySearchTimer;
+            librarySearchInput.addEventListener('input', () => {
+                clearTimeout(librarySearchTimer);
+                librarySearchTimer = setTimeout(() => {
+                    applyLibraryFilters();
+                }, 300); 
+            });
+
+
+            console.log('Open Library App Initialization Complete.');
+        }
+
+        window.addEventListener('load', initialize);
+
+    </script>
+</body>
+</html>
