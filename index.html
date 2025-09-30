@@ -14,7 +14,7 @@
     <!-- Firebase SDK Imports -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, signOut, GoogleAuthProvider, signInWithPopup } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, getDoc, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, collection, query, where, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         
         // Expose Firebase functions globally for the main script block to use
@@ -22,7 +22,9 @@
             initializeApp, getAuth, signInAnonymously, signInWithCustomToken, 
             onAuthStateChanged, signOut, getFirestore, doc, getDoc, 
             addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, 
-            collection, query, where, getDocs
+            collection, query, where, getDocs,
+            // NEW: Google Auth Providers
+            GoogleAuthProvider, signInWithPopup 
         };
     </script>
     <style>
@@ -132,7 +134,7 @@
                     Unlock infinite reading possibilities across the literary universe.
                 </p>
                 <button onclick="router.handleLandingStart()" class="text-2xl bg-blue-600 text-white p-5 rounded-full font-extrabold hover:bg-blue-500 transition duration-300 shadow-xl glowing-shadow transform hover:scale-[1.05] flex items-center justify-center mx-auto">
-                    <i data-lucide="arrow-right-circle" class="w-7 h-7 inline mr-3"></i> Get Started
+                    <i data-lucide="log-in" class="w-7 h-7 inline mr-3"></i> Sign in with Google
                 </button>
             </div>
         </section>
@@ -308,6 +310,7 @@
         const userInfoDisplay = document.getElementById('user-info-display');
         const displayUid = document.getElementById('display-uid');
         const displayLoginType = document.getElementById('display-login-type');
+        const displayEmail = document.getElementById('display-email'); // Defined for better profile display
         const logoutButton = document.getElementById('logout-button');
         
         lucide.createIcons(); 
@@ -386,19 +389,7 @@
                         resolve(); 
                     });
                     
-                    const initialSign = async () => {
-                        // FIX: Directly call signInAnonymously if not already signed in.
-                        // The previous logic was causing 'auth/admin-restricted-operation' 
-                        // by potentially trying to resolve an old session using an invalid method.
-                        if (!auth.currentUser) {
-                            console.log("Attempting initial anonymous sign-in...");
-                            await firebase.signInAnonymously(auth);
-                        }
-                    };
-                    
-                    // We execute initial sign-in attempt outside of the onAuthStateChanged 
-                    // resolution promise, but ensure it runs right after initialization.
-                    initialSign(); 
+                    // REMOVED initialSign call: We no longer auto-sign in anonymously; user must click "Sign in with Google."
                 });
             } catch (error) {
                 console.error("FATAL: Firebase Initialization failed.", error);
@@ -456,7 +447,7 @@
                 if (pageId === prevPageId) return;
                 
                 if (['explore', 'library', 'profile'].includes(pageId) && !auth.currentUser) {
-                    showMessage("Please 'Get Started' first to explore the cosmos!", 'error');
+                    showMessage("Please 'Sign in with Google' first to explore the cosmos!", 'error');
                     return;
                 }
 
@@ -488,22 +479,31 @@
             },
             
             handleLandingStart: async function() {
-                if (!auth.currentUser) {
-                    showMessage("Connecting to the Cosmic Nexus...", 'info');
-                    try {
-                        // On Vercel, we rely on the anonymous sign-in performed during setupFirebase
-                        await firebase.signInAnonymously(auth);
-                    } catch (error) {
-                        console.error("Authentication failed during Get Started:", error);
-                        // FIX: Updated error message to be more specific about the necessary Firebase setting
-                        showMessage("Authentication failed. Please ensure Anonymous Authentication is enabled in your Firebase console.", 'error');
-                        return;
-                    }
-                }
-                
                 if (auth.currentUser) {
                     router.navigate('explore');
-                    showMessage("Welcome to the Cosmic Library! Your anonymous session is live.", 'success');
+                    return;
+                }
+
+                showMessage("Opening Google Sign-in Portal...", 'info');
+                
+                try {
+                    const provider = new firebase.GoogleAuthProvider();
+                    // Optional: Request prompt for account selection every time
+                    // provider.setCustomParameters({ prompt: 'select_account' });
+                    
+                    const result = await firebase.signInWithPopup(auth, provider);
+                    const user = result.user;
+                    
+                    router.navigate('explore');
+                    showMessage(`Welcome to the Cosmic Library, ${user.displayName || user.email}!`, 'success');
+
+                } catch (error) {
+                    console.error("Google Sign-in failed:", error);
+                    let msg = "Sign-in failed. Please ensure **Google Sign-in** is enabled in the Firebase Console.";
+                    if (error.code === 'auth/popup-closed-by-user') {
+                         msg = "Sign-in cancelled by user.";
+                    }
+                    showMessage(msg, 'error');
                 }
             }
         };
@@ -763,7 +763,15 @@
 
             if (user) {
                 displayUid.textContent = user.uid;
-                displayLoginType.textContent = user.isAnonymous ? "Anonymous Session" : "Email/Password";
+                
+                // Check if user has provider data (Google login) or is anonymous
+                const loginType = user.providerData && user.providerData.length > 0 
+                    ? (user.providerData[0].providerId.includes('google') ? "Google Account" : "Unknown")
+                    : (user.isAnonymous ? "Anonymous Session" : "Unknown");
+                    
+                displayLoginType.textContent = loginType;
+                displayEmail.textContent = user.email || 'Not available';
+                
                 userInfoDisplay.classList.remove('hidden');
                 logoutButton.classList.remove('hidden');
                 authStatusDiv.innerHTML = ''; 
